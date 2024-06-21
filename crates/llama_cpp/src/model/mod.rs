@@ -20,7 +20,7 @@ use llama_cpp_sys::{
     llama_load_model_from_file, llama_model, llama_model_meta_val_str, llama_n_ctx_train,
     llama_n_embd, llama_n_vocab, llama_new_context_with_model, llama_token, llama_token_bos,
     llama_token_eos, llama_token_eot, llama_token_get_text, llama_token_middle, llama_token_nl,
-    llama_token_prefix, llama_token_suffix, llama_token_to_piece, llama_tokenize,
+    llama_token_prefix, llama_token_suffix, llama_token_to_piece, llama_tokenize, llama_free
 };
 pub use params::*;
 
@@ -384,6 +384,7 @@ impl LlamaModel {
                 token.0,
                 buffer.as_mut_ptr() as *mut c_char,
                 std::os::raw::c_int::from(initial_size),
+                true
             )
         };
 
@@ -398,6 +399,7 @@ impl LlamaModel {
                     token.0,
                     buffer.as_mut_ptr() as *mut c_char,
                     std::os::raw::c_int::from(buffer.len() as i32),
+                    true,
                 )
             };
             assert_eq!(size as usize, buffer.len(), "Buffer length doesn't match");
@@ -442,6 +444,7 @@ impl LlamaModel {
                     t.0,
                     token_buf.as_mut_ptr() as *mut c_char,
                     token_buf.len() as i32,
+                    true
                 )
             };
 
@@ -575,12 +578,12 @@ impl LlamaModel {
             llama_kv_cache_clear(context);
             llama_decode(context, batch.handle())
         };
-
         if res < 0 {
             return Err(LlamaContextError::DecodeFailed(res));
         }
 
         let mut out = Vec::with_capacity(token_counts.len());
+
 
         for (i, count) in token_counts.iter().enumerate() {
             let embedding = unsafe {
@@ -643,7 +646,6 @@ impl LlamaModel {
                 max_tokens = *count;
             }
         }
-
         let batch_capacity = if max_tokens > self.training_size {
             warn!("Large embedding input requires a context larger than the model's training context.");
             max_tokens
@@ -662,6 +664,7 @@ impl LlamaModel {
             llama_new_context_with_model(**model_lock, context_params)
         };
 
+
         if context.is_null() {
             return Err(LlamaContextError::SessionFailed);
         }
@@ -671,13 +674,14 @@ impl LlamaModel {
         for input in inputs {
             if batch.tokens() + input.len() > batch_capacity {
                 trace!("Decoding {} embedding tokens", batch.tokens());
+                let end = submitted + batch_input_count;
                 out.append(&mut self.embeddings_decode(
                     context,
                     &batch,
-                    &token_counts[submitted..batch_input_count],
+                    &token_counts[submitted..end],
                 )?);
                 batch.clear();
-                submitted = batch_input_count;
+                submitted = end;
                 batch_input_count = 0;
             }
 
@@ -688,14 +692,17 @@ impl LlamaModel {
             batch.set_logits(batch.tokens() - 1, true);
             batch_input_count += 1;
         }
-
         if 0 < batch_input_count {
             trace!("Decoding remaining {} embedding tokens", batch.tokens());
             out.append(&mut self.embeddings_decode(
                 context,
                 &batch,
-                &token_counts[submitted..batch_input_count],
+                &token_counts[submitted..],
             )?);
+        }
+
+        unsafe {
+            llama_free(context);
         }
 
         Ok(out)
