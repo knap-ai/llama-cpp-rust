@@ -283,6 +283,9 @@ pub struct SessionParams {
 
     /// defragment the KV cache if holes/size > thold, < 0 disabled (default)
     pub defrag_threshold: f32,
+
+    /// Flash attention
+    pub flash_attn: bool,
 }
 
 impl Default for SessionParams {
@@ -316,6 +319,7 @@ impl Default for SessionParams {
             offload_kqv: c_defaults.offload_kqv,
             pooling: c_defaults.pooling_type.into(),
             defrag_threshold: c_defaults.defrag_thold,
+            flash_attn: c_defaults.flash_attn,
         }
     }
 }
@@ -349,6 +353,7 @@ impl From<SessionParams> for llama_context_params {
             pooling_type: value.pooling.into(),
             abort_callback: None,
             abort_callback_data: null_mut(),
+            flash_attn: false,
         }
     }
 }
@@ -377,6 +382,7 @@ impl From<llama_context_params> for SessionParams {
             offload_kqv: value.offload_kqv,
             pooling: value.pooling_type.into(),
             defrag_threshold: value.defrag_thold,
+            flash_attn: value.flash_attn,
         }
     }
 }
