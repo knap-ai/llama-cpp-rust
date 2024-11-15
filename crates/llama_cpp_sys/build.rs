@@ -977,16 +977,35 @@ mod compat {
         symbols: HashSet<&str>,
         out_path: impl AsRef<Path>,
     ) {
-        let mut cmd = Command::new(tool.to_string());
-        cmd.current_dir(&out_path);
-        for symbol in symbols {
-            cmd.arg(format!("--redefine-sym={symbol}={prefix}{symbol}"));
-        }
+        let temp_file_path = out_path.as_ref().join("objcopy_args.txt");
 
-        let output = cmd
-            .arg(target_lib)
+        // Create the response file
+        let mut response_file = File::create(&temp_file_path)
+            .unwrap_or_else(|e| panic!("Failed to create response file \"{temp_file_path:?}\". ({e})"));
+
+        for symbol in symbols {
+            let formatted_str = format!("{prefix}{symbol}");
+            writeln!(
+                response_file,
+                "--redefine-sym={}={}",
+                symbol,
+                formatted_str,
+            )
+            .unwrap_or_else(|e| panic!("Failed to write to response file \"{temp_file_path:?}\". ({e})"));
+        }
+        writeln!(response_file, "{}", target_lib)
+            .unwrap_or_else(|e| panic!("Failed to write target library to response file. ({e})"));
+
+        // Run the tool with the response file
+        let output = Command::new(tool.to_string())
+            .current_dir(&out_path)
+            .arg(format!("@{}", temp_file_path.to_string_lossy()))
             .output()
-            .unwrap_or_else(move |e| panic!("Failed to run \"{tool}\". ({e})"));
+            .unwrap_or_else(|e| panic!("Failed to run \"{tool}\". ({e})"));
+
+        // Clean up the response file
+        std::fs::remove_file(&temp_file_path)
+            .unwrap_or_else(|e| panic!("Failed to remove response file \"{temp_file_path:?}\". ({e})"));
 
         if !output.status.success() {
             panic!(
@@ -996,6 +1015,33 @@ mod compat {
             );
         }
     }
+
+    // fn objcopy_redefine(
+    //     tool: &Tool,
+    //     target_lib: &str,
+    //     prefix: &str,
+    //     symbols: HashSet<&str>,
+    //     out_path: impl AsRef<Path>,
+    // ) {
+    //     let mut cmd = Command::new(tool.to_string());
+    //     cmd.current_dir(&out_path);
+    //     for symbol in symbols {
+    //         cmd.arg(format!("--redefine-sym={symbol}={prefix}{symbol}"));
+    //     }
+
+    //     let output = cmd
+    //         .arg(target_lib)
+    //         .output()
+    //         .unwrap_or_else(move |e| panic!("Failed to run \"{tool}\". ({e})"));
+
+    //     if !output.status.success() {
+    //         panic!(
+    //             "An error has occurred while redefining symbols from library file \"{target_lib}\" ({}):\n{}",
+    //             output.status,
+    //             String::from_utf8_lossy(&output.stderr)
+    //         );
+    //     }
+    // }
 
     /// A filter for a symbol in a library.
     struct Filter<'a> {
